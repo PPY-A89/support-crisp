@@ -36,7 +36,39 @@ app.post("/webhook", async (req, res) => {
       hasAnthropicKey: !!ANTHROPIC_KEY
     });
 
-    // Appel Claude
+    // Récupère l'historique de la conversation depuis Crisp
+    let formattedHistory = [];
+    try {
+      const historyRes = await axios.get(
+        `https://api.crisp.chat/v1/website/${WEBSITE_ID}/conversation/${session_id}/messages`,
+        {
+          auth: { username: CRISP_ID, password: CRISP_KEY },
+          headers: { "X-Crisp-Tier": "plugin" }
+        }
+      );
+
+      const historyMessages = historyRes.data?.data || [];
+
+      formattedHistory = historyMessages
+        .filter(m => m.type === "text" && (m.from === "user" || m.from === "operator"))
+        .map(m => ({
+          role: m.from === "user" ? "user" : "assistant",
+          content: m.content
+        }));
+
+      console.log("Historique récupéré:", formattedHistory.length, "messages");
+    } catch (histErr) {
+      console.error("Erreur récupération historique:", histErr.message);
+      // Si l'historique échoue, on continue avec juste le message actuel
+      formattedHistory = [{ role: "user", content: message }];
+    }
+
+    // Si l'historique est vide, on utilise le message actuel
+    if (formattedHistory.length === 0) {
+      formattedHistory = [{ role: "user", content: message }];
+    }
+
+    // Appel Claude avec historique complet
     const aiResponse = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
@@ -66,7 +98,7 @@ RESERVATIONS ET ANNULATIONS
 Questions de base (comment réserver, publier un trajet) :
 Guide l'utilisateur simplement.
 - Réserver : rechercher le trajet sur l'app, choisir une offre, payer en ligne ou en espèces.
-- Publier : aller dans "Proposer un trajet", remplir les infos, publier.
+- Publier : aller dans Proposer un trajet, remplir les infos, publier.
 
 Problème sur une réservation spécifique :
 Demande le trajet (ville départ, ville arrivée, date) ainsi que l'email ou mobile. Un collègue prendra le relais.
@@ -120,7 +152,7 @@ CE QUE SARRA NE FAIT PAS
 - Elle ne promet pas de délais précis.
 - Elle ne traite pas de sujets hors Pip Pip Yalah.
 - Elle ne répond jamais à une provocation ou une insulte.`,
-        messages: [{ role: "user", content: message }]
+        messages: formattedHistory
       },
       {
         headers: {
@@ -140,20 +172,20 @@ CE QUE SARRA NE FAIT PAS
 
     await axios.post(
       crispUrl,
-     { type: "text", content: reply, from: "operator", origin: "chat" },
-  {
-    headers: {
-      "Content-Type": "application/json",
-      "X-Crisp-Tier": "plugin"
-    },
-    auth: {
-      username: CRISP_ID,
-      password: CRISP_KEY
+      { type: "text", content: reply, from: "operator", origin: "chat" },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Crisp-Tier": "plugin"
+        },
+        auth: {
+          username: CRISP_ID,
+          password: CRISP_KEY
         }
       }
     );
 
-    console.log("✅ Réponse envoyée à Crisp");
+    console.log("Réponse envoyée à Crisp");
     res.sendStatus(200);
 
   } catch (err) {
