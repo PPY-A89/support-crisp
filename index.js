@@ -15,26 +15,26 @@ app.post("/webhook", async (req, res) => {
   try {
     const event = req.body;
 
-    // Log complet pour debug
     console.log("EVENT:", JSON.stringify(event, null, 2));
 
-    // On ne traite que les messages utilisateurs
+    // Ne traiter que les messages utilisateurs
     if (event?.data?.from !== "user") {
       console.log("Ignored: not a user message");
       return res.sendStatus(200);
     }
 
     const message = event?.data?.content;
-    const session_id = event?.session_id;
 
-    // Sécurité minimale
+    // IMPORTANT → fallback session_id
+    const session_id = event?.session_id || event?.data?.session_id;
+
     if (!message) {
       console.log("No message content");
       return res.sendStatus(200);
     }
 
     if (!session_id) {
-      console.log("No session_id");
+      console.log("No session_id found → abort");
       return res.sendStatus(200);
     }
 
@@ -63,7 +63,8 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    const reply = aiResponse.data?.content?.[0]?.text || "Réponse indisponible";
+    const reply =
+      aiResponse.data?.content?.[0]?.text || "Réponse indisponible";
 
     console.log("Réponse IA:", reply);
 
