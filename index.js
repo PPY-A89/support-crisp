@@ -16,7 +16,7 @@ app.post("/webhook", async (req, res) => {
     if (event.data?.from !== "user") return res.sendStatus(200);
 
     const message = event.data?.content;
-    const session_id = event.session_id;
+    const session_id = event.data?.session_id || event.session_id;
 
     if (!message || !session_id) return res.sendStatus(200);
 
