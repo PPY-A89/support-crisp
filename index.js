@@ -1,5 +1,6 @@
 const express = require("express");
 const axios = require("axios");
+const rateLimit = require("express-rate-limit");
 const app = express();
 app.use(express.json());
 
@@ -8,22 +9,75 @@ const CRISP_KEY = process.env.CRISP_KEY;
 const WEBSITE_ID = process.env.WEBSITE_ID;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
 
+// Vérification des variables d'environnement au démarrage
+if (!CRISP_ID || !CRISP_KEY || !WEBSITE_ID || !ANTHROPIC_KEY) {
+  console.error("ERREUR : Variables d'environnement manquantes");
+  process.exit(1);
+}
+
+// Rate limiting : max 20 requêtes par minute par IP
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: "Trop de requêtes, veuillez patienter.",
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use("/webhook", limiter);
+
+// Blacklist injections
+const BLACKLIST = [
+  "<script", "javascript:", "SELECT ", "DROP ", "INSERT ", "DELETE ",
+  "prompt(", "alert(", "ignore tes instructions", "ignore your instructions",
+  "nouveau rôle", "act as", "oublie tes instructions", "forget your instructions",
+  "system prompt", "jailbreak"
+];
+
+const isBlacklisted = (text) =>
+  BLACKLIST.some(term => text.toLowerCase().includes(term.toLowerCase()));
+
 app.post("/webhook", async (req, res) => {
   try {
     const event = req.body;
     console.log("EVENT:", JSON.stringify(event, null, 2));
 
+    // Ignore les messages operator
     const from = event?.data?.from;
     if (from === "operator") {
       console.log("Ignored: operator message");
       return res.sendStatus(200);
     }
 
+    // Bloque tout ce qui n'est pas du texte (images, fichiers, PDFs...)
+    if (event?.data?.type !== "text") {
+      console.log("Ignored: non-text message type:", event?.data?.type);
+      return res.sendStatus(200);
+    }
+
     const message = event?.data?.content;
     const session_id = event?.data?.session_id || event?.session_id;
 
+    // Bloque messages vides ou manquants
     if (!message || !session_id) {
       console.log("Missing message or session_id");
+      return res.sendStatus(200);
+    }
+
+    // Bloque messages trop courts
+    if (message.trim().length < 2) {
+      console.log("Ignored: message too short");
+      return res.sendStatus(200);
+    }
+
+    // Bloque messages trop longs (spam)
+    if (message.length > 1000) {
+      console.log("Ignored: message too long");
+      return res.sendStatus(200);
+    }
+
+    // Bloque injections et prompt hacking
+    if (isBlacklisted(message)) {
+      console.log("Ignored: blacklisted content");
       return res.sendStatus(200);
     }
 
@@ -43,7 +97,8 @@ app.post("/webhook", async (req, res) => {
         `https://api.crisp.chat/v1/website/${WEBSITE_ID}/conversation/${session_id}/messages`,
         {
           auth: { username: CRISP_ID, password: CRISP_KEY },
-          headers: { "X-Crisp-Tier": "plugin" }
+          headers: { "X-Crisp-Tier": "plugin" },
+          timeout: 8000
         }
       );
 
@@ -54,16 +109,16 @@ app.post("/webhook", async (req, res) => {
         .map(m => ({
           role: m.from === "user" ? "user" : "assistant",
           content: m.content
-        }));
+        }))
+        .slice(-20); // Limite à 20 derniers messages pour éviter dépassement de tokens
 
       console.log("Historique récupéré:", formattedHistory.length, "messages");
     } catch (histErr) {
       console.error("Erreur récupération historique:", histErr.message);
-      // Si l'historique échoue, on continue avec juste le message actuel
       formattedHistory = [{ role: "user", content: message }];
     }
 
-    // Si l'historique est vide, on utilise le message actuel
+    // Fallback si historique vide
     if (formattedHistory.length === 0) {
       formattedHistory = [{ role: "user", content: message }];
     }
@@ -159,7 +214,8 @@ CE QUE SARRA NE FAIT PAS
           "x-api-key": ANTHROPIC_KEY,
           "anthropic-version": "2023-06-01",
           "content-type": "application/json"
-        }
+        },
+        timeout: 15000
       }
     );
 
@@ -181,7 +237,8 @@ CE QUE SARRA NE FAIT PAS
         auth: {
           username: CRISP_ID,
           password: CRISP_KEY
-        }
+        },
+        timeout: 8000
       }
     );
 
