@@ -62,11 +62,15 @@ app.post("/webhook", async (req, res) => {
 
     await axios.post(
       crispUrl,
-      { type: "text", content: reply },
-      {
-        auth: {
-          username: CRISP_ID,
-          password: CRISP_KEY
+     { type: "text", content: reply, from: "operator", origin: "chat" },
+  {
+    headers: {
+      "Content-Type": "application/json",
+      "X-Crisp-Tier": "plugin"
+    },
+    auth: {
+      username: CRISP_ID,
+      password: CRISP_KEY
         }
       }
     );
